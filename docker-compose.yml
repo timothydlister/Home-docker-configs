@@ -1,0 +1,60 @@
+version: '3'
+
+services:
+  reverse-proxy:
+    # The official v2.0 Traefik docker image
+    image: traefik:v2.0
+    container_name: "traefik"
+    # Enables the web UI and tells Traefik to listen to docker
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.https.address=:443"
+      - "--entrypoints.subsonic.address=:4040"
+      - "--providers.docker.exposedbydefault=false"
+      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
+      #- "--certificatesresolvers.mytlschallenge.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.mytlschallenge.acme.email=my-email@fastmail.com"
+      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
+    ports:
+      # The HTTP port
+      - "80:80"
+      # The Web UI (enabled by --api.insecure=true)
+      - "8083:8080"
+      - "443:443"
+      - "4040:4040"
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - "/var/lib/docker/volumes/letsencrypt:/letsencrypt"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  funkwhale:
+    container_name: funkwhale
+    restart: unless-stopped
+    # add the version number in your .env file, or hardcode it
+    image: funkwhale/all-in-one:${FUNKWHALE_VERSION}
+    env_file: .env
+    environment:
+      # adapt to the pid/gid that own /srv/funkwhale/data
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /srv/funkwhale/data:/data
+      - /srv/funkwhale/data/music:/music:ro
+    ports:
+      - "80"
+      - "443"
+      - "4040"
+    labels:
+      - traefik.enable=true
+      # Provide HTTP to HTTPS redirect.
+      - traefik.http.middlewares.funkwhale-redirect-web-secure.redirectscheme.scheme=https
+      - traefik.http.routers.funkwhale-web.middlewares=funkwhale-redirect-web-secure
+      - traefik.http.routers.funkwhale-web.rule=Host(`music.mydomain.art`)
+      - traefik.http.routers.funkwhale-web.entrypoints=web
+      - traefik.http.routers.funkwhale-web-secure.rule=Host(`music.mydomain.art`)
+      # Go get a Lets Encrypt cert and load into Traefik.
+      - traefik.http.routers.funkwhale-web-secure.tls.certresolver=mytlschallenge
+      - traefik.http.routers.funkwhale-web-secure.tls=true
+      - traefik.http.routers.funkwhale-web-secure.entrypoints=https
